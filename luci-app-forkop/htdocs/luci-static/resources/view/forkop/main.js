@@ -4694,7 +4694,8 @@ function getComponentActionKey(component, action) {
 
 // src/forkop/helpers/singBoxVariant.ts
 function isExtendedSingBoxVersion(version) {
-  return String(version || "").includes("extended");
+  const v = String(version || "");
+  return v.includes("extended") || v.includes("-lx");
 }
 function isVersionPlaceholder(version) {
   const normalized = String(version || "").trim().toLowerCase();

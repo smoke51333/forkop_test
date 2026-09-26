@@ -1040,7 +1040,7 @@ function capability_flags() {
             result.sing_box_compressed = 1;
             result.sing_box_tailscale = 1;
         }
-        else if (marker_is("extended")) {
+        else if (marker_is("extended") || marker_is("lx") || marker_is("custom_lx")) {
             result.sing_box_extended = 1;
             result.sing_box_tailscale = 1;
         }
@@ -1052,7 +1052,7 @@ function capability_flags() {
         }
         else {
             let info = sing_box_version_info();
-            if (info != null && index(info.version, "extended") >= 0) {
+            if (info != null && (index(info.version, "extended") >= 0 || index(info.version, "-lx") >= 0)) {
                 result.sing_box_extended = 1;
                 result.sing_box_tailscale = 1;
             }

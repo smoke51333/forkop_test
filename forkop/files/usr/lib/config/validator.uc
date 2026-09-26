@@ -1814,15 +1814,16 @@ function get_sing_box_version(ctx) {
 }
 
 function sing_box_version_is_extended(version) {
-    return index(as_string(version), "extended") >= 0;
+    version = as_string(version);
+    return index(version, "extended") >= 0 || index(version, "-lx") >= 0;
 }
 
 function sing_box_is_extended(ctx, version) {
-    if (as_string(version) == "" && command_exists("sing-box") &&
-        (sing_box_compressed_marker_set(ctx) || sing_box_extended_marker_set(ctx)))
+    if (command_exists("sing-box") &&
+        (sing_box_compressed_marker_set(ctx) || sing_box_extended_marker_set(ctx) || sing_box_variant_marker(ctx, "lx") || sing_box_variant_marker(ctx, "custom_lx")))
         return true;
 
-    return sing_box_version_is_extended(version != null ? version : get_sing_box_version(ctx));
+    return sing_box_version_is_extended(version != null && as_string(version) != "" ? version : get_sing_box_version(ctx));
 }
 
 function sing_box_output_has_build_tag(output, tag) {
@@ -2043,7 +2044,7 @@ function check_runtime_requirements() {
         fail_requirement("Package 'sing-box' version (" + sing_box_version + ") is lower than the required minimum (" + ctx.sing_box_required_version + "). Update sing-box: opkg update && opkg remove sing-box && opkg install sing-box. Aborted.", "error");
     }
 
-    if (!service_exists("sing-box") && sing_box_compressed_marker_set(ctx))
+    if (!service_exists("sing-box") && (sing_box_compressed_marker_set(ctx) || command_exists("sing-box")))
         install_managed_sing_box_service_script(ctx);
 
     if (!service_exists("sing-box"))

@@ -1737,22 +1737,47 @@ select_sing_box_installation() {
 }
 
 install_selected_sing_box() {
-    msg "Installing system sing-box package to satisfy dependencies..."
-    pkg_install_name "sing-box" || true
-
     msg "Installing custom sing-box 1.14.0-lx (Leadaxe fork)..."
 
-    ARCH="$(uname -m)"
-    case "$ARCH" in
-        x86_64)          SB_ARCH="amd64" ;;
-        aarch64|arm64)   SB_ARCH="arm64" ;;
-        armv7*|armv6*)   SB_ARCH="armv7" ;;
-        mips)            SB_ARCH="mips-softfloat" ;;
-        mipsel)          SB_ARCH="mipsle-softfloat" ;;
-        riscv64)         SB_ARCH="riscv64" ;;
-        i386|i686)       SB_ARCH="386" ;;
+    # Stop existing sing-box process if running to avoid 'Text file busy'
+    if [ -x /etc/init.d/sing-box ]; then
+        /etc/init.d/sing-box stop >/dev/null 2>&1 || true
+    fi
+    killall -9 sing-box >/dev/null 2>&1 || true
+
+    # Remove conflicting sing-box-tiny package if installed
+    if [ "$PKG_IS_APK" -eq 1 ]; then
+        apk del sing-box-tiny >/dev/null 2>&1 || true
+    else
+        opkg remove sing-box-tiny >/dev/null 2>&1 || true
+    fi
+
+    raw_arch="$(uname -m)"
+    distrib_arch="$(read_openwrt_release_value "DISTRIB_ARCH" 2>/dev/null || true)"
+
+    case "$raw_arch" in
+        x86_64)
+            SB_ARCH="amd64"
+            ;;
+        aarch64|arm64)
+            SB_ARCH="arm64"
+            ;;
+        armv7*|armv6*|arm)
+            SB_ARCH="armv7"
+            ;;
+        mips*)
+            if [ "$raw_arch" = "mipsel" ] || [ "$raw_arch" = "mipsle" ]; then
+                SB_ARCH="mipsle-softfloat"
+            elif case "$distrib_arch" in *mipsel*|*mipsle*) true ;; *) false ;; esac; then
+                SB_ARCH="mipsle-softfloat"
+            elif grep -qi "little" /proc/cpuinfo 2>/dev/null; then
+                SB_ARCH="mipsle-softfloat"
+            else
+                SB_ARCH="mips-softfloat"
+            fi
+            ;;
         *)
-            fail "Unsupported router architecture: $ARCH"
+            fail "Unsupported router architecture: $raw_arch"
             ;;
     esac
 
@@ -1761,7 +1786,7 @@ install_selected_sing_box() {
     LX_URL="https://github.com/Leadaxe/sing-box-lx/releases/download/${LX_TAG}/${LX_FILENAME}"
     SB_TAR="$TMP_DIR/sing-box-lx.tar.gz"
 
-    msg "Detected architecture: $ARCH -> sing-box asset: $LX_FILENAME"
+    msg "Detected architecture: $raw_arch (distrib: ${distrib_arch:-unknown}) -> sing-box asset: $LX_FILENAME"
     download_with_retry "$LX_URL" "$SB_TAR" "sing-box 1.14.0-lx ($SB_ARCH)" ||
         fail "Failed to download sing-box 1.14.0-lx from $LX_URL"
 
@@ -1770,9 +1795,76 @@ install_selected_sing_box() {
     extracted_bin="$(find "$TMP_DIR" -type f -name "sing-box" | head -n 1)"
     [ -n "$extracted_bin" ] || fail "sing-box executable binary not found inside archive"
 
-    # Заменяем системный бинарник на кастомную сборку lx
+    # Install binary
     cp -f "$extracted_bin" /usr/bin/sing-box
-    chmod +x /usr/bin/sing-box
+    chmod 0755 /usr/bin/sing-box
+
+    # Ensure required runtime and config directories exist
+    mkdir -p /usr/share/sing-box /etc/sing-box /etc/config /etc/forkop /var/run/forkop /tmp/sing-box
+
+    # Ensure managed procd service script exists
+    if [ ! -f /etc/init.d/sing-box ] || ! grep -q '/usr/bin/sing-box' /etc/init.d/sing-box 2>/dev/null; then
+        msg "Setting up sing-box init service (/etc/init.d/sing-box)..."
+        cat > /etc/init.d/sing-box <<'EOF'
+#!/bin/sh /etc/rc.common
+# Forkop managed sing-box service for binary variants
+
+USE_PROCD=1
+START=99
+PROG="/usr/bin/sing-box"
+
+start_service() {
+    config_load "sing-box"
+    local enabled config_file working_directory
+    local log_stderr
+
+    config_get_bool enabled "main" "enabled" "0"
+    [ "$enabled" -eq "1" ] || return 0
+
+    config_get config_file "main" "conffile" "/etc/sing-box/config.json"
+    config_get working_directory "main" "workdir" "/usr/share/sing-box"
+    config_get_bool log_stderr "main" "log_stderr" "1"
+
+    procd_open_instance
+    procd_set_param command "$PROG" run -c "$config_file" -D "$working_directory"
+    procd_set_param file "$config_file"
+    procd_set_param stderr "$log_stderr"
+    procd_set_param limits core="unlimited"
+    procd_set_param limits nofile="1000000 1000000"
+    procd_set_param respawn
+    procd_close_instance
+}
+
+service_triggers() {
+    procd_add_reload_trigger "sing-box"
+}
+EOF
+        chmod 0755 /etc/init.d/sing-box
+    fi
+
+    # Ensure /etc/config/sing-box exists with required defaults
+    if [ ! -f /etc/config/sing-box ]; then
+        cat > /etc/config/sing-box <<'EOF'
+config sing-box 'main'
+	option enabled '1'
+	option user 'root'
+	option conffile '/etc/sing-box/config.json'
+	option workdir '/usr/share/sing-box'
+EOF
+        chmod 0644 /etc/config/sing-box
+    fi
+
+    # Record variant and version markers for Forkop
+    printf '%s\n' "extended" > /etc/forkop/sing-box-variant
+    printf '%s\n' "${LX_TAG#v}" > /etc/forkop/sing-box-version
+    chmod 0644 /etc/forkop/sing-box-variant /etc/forkop/sing-box-version 2>/dev/null || true
+
+    # Clear cached state so Forkop UI and diagnostics reflect the new version immediately
+    rm -f /var/run/forkop/ui-state/sing-box-version \
+          /var/run/forkop/system-info.json \
+          /tmp/forkop/system-info.json \
+          /tmp/forkop.latest-version.cache \
+          /tmp/forkop.sing-box-version.cache* 2>/dev/null || true
 
     msg "Installed sing-box version:"
     /usr/bin/sing-box version

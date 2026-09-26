@@ -254,12 +254,13 @@ function sing_box_version() {
 }
 
 function sing_box_version_is_extended(value) {
-    return index(as_string(value), "extended") >= 0;
+    value = as_string(value);
+    return index(value, "extended") >= 0 || index(value, "-lx") >= 0;
 }
 
 function sing_box_is_extended(value) {
     value = as_string(value);
-    if (value == "" && command_exists("sing-box") && (sing_box_marker_is("extended-compressed") || sing_box_marker_is("extended")))
+    if (value == "" && command_exists("sing-box") && (sing_box_marker_is("extended-compressed") || sing_box_marker_is("extended") || sing_box_marker_is("lx") || sing_box_marker_is("custom_lx")))
         return true;
 
     return sing_box_version_is_extended(value != "" ? value : sing_box_version());
@@ -460,8 +461,8 @@ function prepare_service_disabled() {
 function configure_service() {
     let settings = uci_settings();
 
-    if (sing_box_compressed_marker_set() && !install_managed_service_script()) {
-        log_message("Failed to install managed sing-box service for compressed binary. Aborted.", "fatal");
+    if ((sing_box_compressed_marker_set() || !file_exists("/etc/init.d/sing-box")) && !install_managed_service_script()) {
+        log_message("Failed to install managed sing-box service. Aborted.", "fatal");
         exit(1);
     }
 

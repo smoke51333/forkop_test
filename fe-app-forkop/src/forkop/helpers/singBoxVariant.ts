@@ -7,7 +7,8 @@ type SingBoxVariantFields = {
 };
 
 export function isExtendedSingBoxVersion(version?: string) {
-  return String(version || '').includes('extended');
+  const v = String(version || '');
+  return v.includes('extended') || v.includes('-lx');
 }
 
 function isVersionPlaceholder(version?: string) {
