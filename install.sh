@@ -104,13 +104,13 @@ init_tmp_dir() {
 }
 
 detect_fetcher() {
-    if command_exists wget; then
-        FETCHER="wget"
+    if command_exists curl; then
+        FETCHER="curl"
         return 0
     fi
 
-    if command_exists curl; then
-        FETCHER="curl"
+    if command_exists wget; then
+        FETCHER="wget"
         return 0
     fi
 
@@ -263,10 +263,10 @@ EOF
 http_get() {
     case "$FETCHER" in
         wget)
-            run_with_deadline "$METADATA_TIMEOUT_SECONDS" wget -T "$CONNECT_TIMEOUT_SECONDS" -qO- "$1"
+            run_with_deadline "$METADATA_TIMEOUT_SECONDS" wget --no-check-certificate -T "$CONNECT_TIMEOUT_SECONDS" -qO- "$1"
             ;;
         curl)
-            curl --connect-timeout "$CONNECT_TIMEOUT_SECONDS" --max-time "$METADATA_TIMEOUT_SECONDS" -fsSL "$1"
+            curl -k --connect-timeout "$CONNECT_TIMEOUT_SECONDS" --max-time "$METADATA_TIMEOUT_SECONDS" -fsSL "$1"
             ;;
         *)
             return 1
@@ -1411,10 +1411,10 @@ install_json_ucode() {
 download_file_once() {
     case "$FETCHER" in
         wget)
-            run_with_deadline "$DOWNLOAD_TIMEOUT_SECONDS" wget -T "$CONNECT_TIMEOUT_SECONDS" -q -O "$2" "$1"
+            run_with_deadline "$DOWNLOAD_TIMEOUT_SECONDS" wget --no-check-certificate -T "$CONNECT_TIMEOUT_SECONDS" -q -O "$2" "$1"
             ;;
         curl)
-            curl --connect-timeout "$CONNECT_TIMEOUT_SECONDS" --max-time "$DOWNLOAD_TIMEOUT_SECONDS" -fsSL "$1" -o "$2"
+            curl -k --connect-timeout "$CONNECT_TIMEOUT_SECONDS" --max-time "$DOWNLOAD_TIMEOUT_SECONDS" -fsSL "$1" -o "$2"
             ;;
         *)
             return 1
@@ -1478,6 +1478,19 @@ pkg_install_files() {
     else
         opkg install --force-overwrite --force-downgrade "$@" </dev/null
     fi
+}
+
+setup_stable_downloader() {
+    msg "Preparing stable downloader and TLS certificates..."
+    pkg_list_update || true
+
+    if [ "$PKG_IS_APK" -eq 1 ]; then
+        apk add ca-certificates curl </dev/null 2>/dev/null || true
+    else
+        opkg install ca-bundle libustream-mbedtls curl </dev/null 2>/dev/null || true
+    fi
+
+    detect_fetcher
 }
 
 ensure_bootstrap_tool() {
@@ -1904,9 +1917,10 @@ main() {
     parse_args "$@"
     check_root
     init_tmp_dir
-    detect_fetcher
     sync_time
     check_system
+
+    setup_stable_downloader
 
     detect_legacy_installation
     decide_i18n_installation
