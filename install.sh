@@ -1,8 +1,8 @@
 #!/bin/sh
 # shellcheck shell=dash
 
-REPO_OWNER="ushan0v"
-REPO_NAME="forkop"
+REPO_OWNER="smoke51333"
+REPO_NAME="forkop_test"
 
 REQUIRED_SPACE_KB=15360
 CONNECT_TIMEOUT_SECONDS=15
@@ -60,9 +60,7 @@ Installs or updates Forkop packages:
   - luci-app-forkop
   - luci-i18n-forkop-ru when requested or when LuCI language is Russian
 
-Can also install or switch sing-box variant:
-  - stable sing-box from OpenWrt feeds
-  - sing-box-extended from GitHub OpenWrt packages (for xHTTP support)
+Installs sing-box-lx (v1.14.0-lx) with encryption and advanced protocol support.
 EOF
 }
 
@@ -1066,29 +1064,6 @@ function installer_cleanup_legacy() {
             packages_removed = false;
     }
 
-    if (!installer_remove_package_prefix("luci-i18n-forkop"))
-        packages_removed = false;
-    if (!installer_remove_package("luci-app-forkop"))
-        packages_removed = false;
-
-    if (!packages_removed) {
-        warn("Failed to remove one or more conflicting or legacy packages.\n");
-        return false;
-    }
-
-    if (legacy_installed) {
-        remove_path(INSTALLER_LEGACY_LIB);
-        remove_path(INSTALLER_LEGACY_INIT);
-        remove_path(INSTALLER_LEGACY_BIN);
-        for (let path in [
-            INSTALLER_LEGACY_LUCI_VIEW,
-            INSTALLER_LEGACY_MENU_JSON,
-            INSTALLER_LEGACY_ACL_JSON,
-            INSTALLER_LEGACY_UCI_DEFAULTS
-        ])
-            remove_path(path);
-    }
-
     if (!forkop_installed) {
         remove_path(INSTALLER_FORKOP_LIB);
         remove_path(INSTALLER_FORKOP_INIT);
@@ -1424,7 +1399,6 @@ EOF
     printf '%s\n' "$helper_path"
 }
 
-
 install_json_ucode() {
     FORKOP_INSTALLER_LEGACY_BRAND="$LEGACY_BRAND" \
     FORKOP_INSTALLER_LEGACY_BACKEND="$LEGACY_BACKEND_PACKAGE" \
@@ -1745,78 +1719,46 @@ sing_box_is_present() {
 }
 
 select_sing_box_installation() {
-    answer=""
-    default_choice=1
-
-    if [ "$FORKOP_LEGACY_DETECTED" -eq 1 ] &&
-        [ -r /etc/init.d/sing-box ] &&
-        grep -Fq 'managed sing-box service for binary variants' /etc/init.d/sing-box; then
-        SING_BOX_INSTALL_VARIANT="extended-compressed"
-        msg "The legacy binary-managed sing-box variant will be reinstalled for Forkop"
-        return 0
-    fi
-
-    if sing_box_is_present; then
-        SING_BOX_INSTALL_VARIANT=""
-        return 0
-    fi
-
-    if [ ! -t 0 ]; then
-        SING_BOX_INSTALL_VARIANT="stable"
-        msg "$(installer_text sing_box_prompt): $default_choice ($(installer_text sing_box_stable), non-interactive)"
-        return 0
-    fi
-
-    while :; do
-        printf '\n%s\n' "$(installer_text sing_box_prompt)"
-        printf '  1) %s\n' "$(installer_text sing_box_stable)"
-        printf '  2) %s\n' "$(installer_text sing_box_extended)"
-        printf '%s [%s]: ' "$(installer_text select)" "$default_choice"
-        read -r answer || return 1
-        [ -n "$answer" ] || answer="$default_choice"
-
-        if [ "$answer" = "1" ]; then
-            SING_BOX_INSTALL_VARIANT="stable"
-            return 0
-        fi
-        if [ "$answer" = "2" ]; then
-            SING_BOX_INSTALL_VARIANT="extended"
-            return 0
-        fi
-
-        warn "$(installer_text invalid_choice)"
-    done
+    SING_BOX_INSTALL_VARIANT="custom_lx"
+    return 0
 }
 
 install_selected_sing_box() {
-    action=""
-    output_file="$TMP_DIR/sing-box-component-action.json"
+    msg "Installing custom sing-box 1.14.0-lx (Leadaxe fork)..."
 
-    case "$SING_BOX_INSTALL_VARIANT" in
-        "")
-            msg "$(installer_text sing_box_skip_msg)"
-            return 0
-            ;;
-        stable)
-            action="install_stable"
-            ;;
-        extended)
-            action="install_extended"
-            ;;
-        extended-compressed)
-            action="install_extended_compressed"
-            ;;
+    ARCH="$(uname -m)"
+    case "$ARCH" in
+        x86_64)          SB_ARCH="amd64" ;;
+        aarch64|arm64)   SB_ARCH="arm64" ;;
+        armv7*|armv6*)   SB_ARCH="armv7" ;;
+        mips)            SB_ARCH="mips-softfloat" ;;
+        mipsel)          SB_ARCH="mipsle-softfloat" ;;
+        riscv64)         SB_ARCH="riscv64" ;;
+        i386|i686)       SB_ARCH="386" ;;
         *)
-            fail "Unknown sing-box installation variant: $SING_BOX_INSTALL_VARIANT"
+            fail "Unsupported router architecture: $ARCH"
             ;;
     esac
 
-    [ -x /usr/bin/forkop ] || fail "forkop backend must be installed before sing-box component action"
-    msg "Installing selected sing-box variant through Forkop ucode backend"
-    if ! /usr/bin/forkop component_action sing_box "$action" >"$output_file" 2>&1; then
-        cat "$output_file" >&2 2>/dev/null || true
-        fail "Failed to install selected sing-box variant"
-    fi
+    LX_TAG="v1.14.0-lx.39"
+    LX_FILENAME="sing-box-${LX_TAG#v}-linux-${SB_ARCH}.tar.gz"
+    LX_URL="https://github.com/Leadaxe/sing-box-lx/releases/download/${LX_TAG}/${LX_FILENAME}"
+    SB_TAR="$TMP_DIR/sing-box-lx.tar.gz"
+
+    msg "Detected architecture: $ARCH -> sing-box asset: $LX_FILENAME"
+    download_with_retry "$LX_URL" "$SB_TAR" "sing-box 1.14.0-lx ($SB_ARCH)" ||
+        fail "Failed to download sing-box 1.14.0-lx from $LX_URL"
+
+    tar -xzf "$SB_TAR" -C "$TMP_DIR" || fail "Failed to extract sing-box archive"
+
+    extracted_bin="$(find "$TMP_DIR" -type f -name "sing-box" | head -n 1)"
+    [ -n "$extracted_bin" ] || fail "sing-box executable binary not found inside archive"
+
+    mv "$extracted_bin" /usr/bin/sing-box
+    chmod +x /usr/bin/sing-box
+
+    msg "Installed sing-box version:"
+    /usr/bin/sing-box version
 }
 
 cleanup_legacy_installation() {
