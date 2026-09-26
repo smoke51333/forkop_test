@@ -10,7 +10,7 @@
 ### Установка
 
 ```sh
-sh <(wget -O - https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh)
+wget -O /tmp/install.sh https://raw.githubusercontent.com/smoke51333/forkop_test/main/install.sh && sh /tmp/install.sh
 ```
 
 <details>
