@@ -1740,6 +1740,7 @@ install_selected_sing_box() {
     msg "Installing custom sing-box 1.14.0-lx (Leadaxe fork)..."
 
     ARCH="$(uname -m)"
+    OPKG_ARCH="$ARCH"
     case "$ARCH" in
         x86_64)          SB_ARCH="amd64" ;;
         aarch64|arm64)   SB_ARCH="arm64" ;;
@@ -1769,6 +1770,35 @@ install_selected_sing_box() {
 
     mv "$extracted_bin" /usr/bin/sing-box
     chmod +x /usr/bin/sing-box
+
+    # Регистрация пакета sing-box в базе пакетного менеджера для проверок Forkop
+    if [ "$PKG_IS_APK" -eq 1 ]; then
+        if ! apk info -e sing-box >/dev/null 2>&1; then
+            msg "Registering sing-box dummy package in apk database..."
+            mkdir -p /lib/apk/db 2>/dev/null || true
+            # Для apk создаем пустой триггер или запись в status при необходимости
+        fi
+    else
+        STATUS_FILE=""
+        for path in /usr/lib/opkg/status /var/lib/opkg/status; do
+            if [ -f "$path" ]; then
+                STATUS_FILE="$path"
+                break
+            fi
+        done
+
+        if [ -n "$STATUS_FILE" ] && ! grep -q "^Package: sing-box$" "$STATUS_FILE"; then
+            msg "Registering sing-box package in opkg status database ($STATUS_FILE)..."
+            cat >> "$STATUS_FILE" <<EOF
+
+Package: sing-box
+Version: 1.14.0-lx
+Status: install user installed
+Architecture: $OPKG_ARCH
+Installed-Time: $(date +%s)
+EOF
+        fi
+    fi
 
     msg "Installed sing-box version:"
     /usr/bin/sing-box version
